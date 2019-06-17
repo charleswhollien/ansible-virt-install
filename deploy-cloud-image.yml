@@ -8,6 +8,7 @@
         state: installed
       with_items:
         - cloud-image-utils
+        - virtinst
     - name: get current image
       get_url:
         url: https://cloud.centos.org/centos/7/images/CentOS-7-x86_64-GenericCloud.qcow2
