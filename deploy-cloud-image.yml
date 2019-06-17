@@ -1,0 +1,75 @@
+---
+- hosts: "{{target}}"
+  become: true
+  tasks:
+    - name: install required packages
+      package:
+        name: "{{item}}"
+        state: installed
+      with_items:
+        - cloud-image-utils
+    - name: get current image
+      get_url:
+        url: https://cloud.centos.org/centos/7/images/CentOS-7-x86_64-GenericCloud.qcow2
+        dest: /var/lib/libvirt/images/CentOS-7-x86_64-GenericCloud.qcow2
+      register: image
+      when: os == "centos"
+    - name: create new image to use. 
+      shell:  sudo qemu-img convert -f qcow2 /var/lib/libvirt/images/CentOS-7-x86_64-GenericCloud.qcow2 /var/lib/libvirt/images/{{name}}.qcow2
+      when: 
+        - os == "centos"
+        - virt == "kvm"
+    - name: get current image
+      get_url:
+        url: https://cloud-images.ubuntu.com/bionic/current/bionic-server-cloudimg-amd64.img 
+        dest: /var/lib/libvirt/images/bionic-server-cloudimg-amd64.img
+      register: image
+      when: os == "ubuntu"
+    - name: create new image to use.
+      shell:  sudo qemu-img convert -f qcow2 /var/lib/libvirt/images/bionic-server-cloudimg-amd64.img /var/lib/libvirt/images/{{name}}.qcow2
+      when: 
+        - os == "ubuntu" 
+        - virt == "kvm"
+    - name: create tar ball and extract
+      shell: mkdir -p /var/lib/libvirt/images/{{name}}/ && virt-tar /var/lib/libvirt/images/CentOS-7-x86_64-GenericCloud.qcow2 -x / /var/lib/libvirt/images/{{name}}/{{name}}.tar && cd /var/lib/libvirt/images/{{name}}/ && tar -xvf {{name}}.tar
+      when: 
+        - virt == "lxc"
+        - os == "centos"
+
+    - name: create tar ball and extract
+      shell: mkdir -p /var/lib/libvirt/images/{{name}}/ && virt-tar /var/lib/libvirt/images/bionic-server-cloudimg-amd64.img -x / /var/lib/libvirt/images/{{name}}/{{name}}.tar && cd /var/lib/libvirt/images/{{name}}/ && tar -xvf {{name}}.tar
+      when: 
+        - virt == "lxc"
+        - os == "ubuntu"
+
+
+    - name: resize image
+      shell: qemu-img resize /var/lib/libvirt/images/{{name}}.qcow2 +{{size}}
+      when: virt == "kvm"
+      #- name: update permissions
+      #shell: chown libvirt-qemu:kvm /var/lib/libvirt/images/{{name}}.qcow2
+      #when: virt == "kvm"
+    - name: create cloud config
+      template: 
+        src: isocloud-{{os}}.j2
+        dest: /var/lib/libvirt/images/{{name}}.txt
+    - name: create cloud config
+      template: 
+        src: isocloud-network-{{os}}.j2
+        dest: /var/lib/libvirt/images/{{name}}-network.txt
+    - name: convert txt to iso. 
+      shell:  cloud-localds --network-config=/var/lib/libvirt/images/{{name}}-network.txt /var/lib/libvirt/images/{{name}}.iso /var/lib/libvirt/images/{{name}}.txt
+    - name: deploy kvm via virt-install
+      shell: virt-install --import --name {{name}} --memory {{memory}} --disk /var/lib/libvirt/images/{{name}}.qcow2,device=disk,bus=virtio --disk /var/lib/libvirt/images/{{name}}.iso,device=cdrom --os-type linux --os-variant centos7.0 --virt-type {{virt}} --graphics none --network bridge=br0 
+      #& sleep 60 && virsh shutdown {{name}} && sleep 15 && virsh start {{name}}
+      when: virt == "kvm"
+    - name: deploy lxc via virt-install
+      shell: virt-install --connect lxc:/// --name {{name}} --memory {{memory}} --filesystem /var/lib/libvirt/images/{{name}},/ --disk /var/lib/libvirt/images/{{name}}.iso,device=cdrom --os-type linux --os-variant centos7.0 --virt-type {{virt}} --network bridge=br0
+      when: 
+        - virt == "lxc"
+        - os == "centos"
+    - name: deploy lxc via virt-install
+      shell: virt-install --connect lxc:/// --name {{name}} --memory {{memory}} --filesystem /var/lib/libvirt/images/{{name}},/ --disk /var/lib/libvirt/images/{{name}}.iso,device=cdrom --os-type linux --os-variant ubuntu18.04 --virt-type {{virt}} --network bridge=br0
+      when: 
+        - virt == "lxc"
+        - os == "ubuntu"
